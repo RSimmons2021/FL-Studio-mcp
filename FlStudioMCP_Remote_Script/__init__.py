@@ -1,4 +1,5 @@
-# FLStudioMCP/init.py
+# name= Fl Studio MCP
+# url=
 from __future__ import absolute_import, print_function, unicode_literals
 
 import socket
