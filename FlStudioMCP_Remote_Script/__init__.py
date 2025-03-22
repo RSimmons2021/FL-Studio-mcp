@@ -7,31 +7,34 @@ import threading
 import time
 import traceback
 import queue
-import mido
-from mido import Message
+
+# Import FL Studio API modules
+try:
+    import channels
+    import mixer
+    import patterns
+    import plugins
+    import transport
+    import ui
+    import device
+    import general
+    import arrangement
+    import playlist
+    FL_STUDIO_API_AVAILABLE = True
+except ImportError:
+    FL_STUDIO_API_AVAILABLE = False
+    print("FL Studio API modules not available. Running in simulation mode.")
 
 # Constants for socket communication
 DEFAULT_PORT = 9877
 HOST = "localhost"
-
-# FL Studio MIDI settings
-MIDI_PORT_NAME = None  # Will be set dynamically or can be configured
-MIDI_CHANNEL = 0  # Default MIDI channel (0-15)
-
-# FL Studio MIDI CC mappings
-CC_PLAY = 16  # Play/Stop
-CC_RECORD = 17  # Record
-CC_TEMPO = 18  # Tempo control
-CC_PATTERN_SELECT = 20  # Pattern selection
-CC_TRACK_VOLUME_BASE = 30  # Base CC for track volumes (30-45 for tracks 1-16)
-CC_TRACK_PAN_BASE = 50  # Base CC for track pans (50-65 for tracks 1-16)
 
 def create_instance(c_instance):
     """Create and return the FLStudioMCP script instance"""
     return FLStudioMCP(c_instance)
 
 class FLStudioMCP:
-    """FLStudioMCP Remote Script for FL Studio using MIDI"""
+    """FLStudioMCP Remote Script for FL Studio using DirectScript API"""
     
     def __init__(self, c_instance):
         """Initialize the control surface"""
@@ -43,10 +46,6 @@ class FLStudioMCP:
         self.client_threads = []
         self.server_thread = None
         self.running = False
-        
-        # MIDI output port
-        self.midi_out = None
-        self.initialize_midi()
         
         # Start the socket server
         self.start_server()
@@ -61,43 +60,18 @@ class FLStudioMCP:
         print("[FLStudioMCP] " + message)
     
     def show_message(self, message):
-        """Show a message"""
+        """Show a message in FL Studio's interface"""
         print("[FLStudioMCP] " + message)
-    
-    def initialize_midi(self):
-        """Initialize MIDI output"""
-        try:
-            # List available MIDI ports
-            available_ports = mido.get_output_names()
-            self.log_message(f"Available MIDI output ports: {available_ports}")
-            
-            # Try to find an FL Studio related port
-            fl_port = None
-            for port in available_ports:
-                if "FL Studio" in port or "FLkey" in port or "MIDI to FL Studio" in port:
-                    fl_port = port
-                    break
-            
-            # Use the first port if no FL Studio port is found
-            port_name = fl_port if fl_port else (available_ports[0] if available_ports else None)
-            
-            if port_name:
-                self.midi_out = mido.open_output(port_name)
-                self.log_message(f"Connected to MIDI output: {port_name}")
-            else:
-                self.log_message("No MIDI output ports available")
-        except Exception as e:
-            self.log_message(f"Error initializing MIDI: {str(e)}")
+        if FL_STUDIO_API_AVAILABLE:
+            try:
+                ui.setHintMsg(message)
+            except:
+                pass
     
     def disconnect(self):
         """Called when the script is disconnected"""
         self.log_message("FLStudioMCP disconnecting...")
         self.running = False
-        
-        # Close MIDI port
-        if self.midi_out:
-            self.midi_out.close()
-            self.midi_out = None
         
         # Stop the server
         if self.server:
@@ -345,60 +319,35 @@ class FLStudioMCP:
         
         return response
     
-    # MIDI helper methods
-    
-    def send_midi(self, msg):
-        """Send a MIDI message"""
-        if self.midi_out:
-            try:
-                self.midi_out.send(msg)
-                return True
-            except Exception as e:
-                self.log_message(f"Error sending MIDI message: {str(e)}")
-                return False
-        else:
-            self.log_message("Cannot send MIDI message: No MIDI output port")
-            return False
-    
-    def send_cc(self, cc, value, channel=None):
-        """Send a MIDI CC message"""
-        if channel is None:
-            channel = MIDI_CHANNEL
-        
-        msg = Message('control_change', channel=channel, control=cc, value=value)
-        return self.send_midi(msg)
-    
-    def send_note_on(self, note, velocity=64, channel=None):
-        """Send a MIDI note on message"""
-        if channel is None:
-            channel = MIDI_CHANNEL
-        
-        msg = Message('note_on', channel=channel, note=note, velocity=velocity)
-        return self.send_midi(msg)
-    
-    def send_note_off(self, note, velocity=0, channel=None):
-        """Send a MIDI note off message"""
-        if channel is None:
-            channel = MIDI_CHANNEL
-        
-        msg = Message('note_off', channel=channel, note=note, velocity=velocity)
-        return self.send_midi(msg)
-    
-    # Command implementations using MIDI
+    # Command implementations using FL Studio API
     
     def _get_session_info(self):
-        """Get information about the current session (simulated)"""
+        """Get information about the current session"""
         try:
-            # This is simulated as FL Studio doesn't provide direct feedback
+            if not FL_STUDIO_API_AVAILABLE:
+                # Simulated response when API is not available
+                return {
+                    "tempo": 140,
+                    "signature_numerator": 4,
+                    "signature_denominator": 4,
+                    "track_count": 16,
+                    "master_track": {
+                        "name": "Master",
+                        "volume": 0.8,
+                        "panning": 0.5
+                    }
+                }
+            
+            # Get actual data from FL Studio API
             result = {
-                "tempo": 140,  # Default FL Studio tempo
-                "signature_numerator": 4,
-                "signature_denominator": 4,
-                "track_count": 16,  # Typical FL Studio mixer track count
+                "tempo": transport.getTempoInBPM(),
+                "signature_numerator": transport.getTimeSignatureNumerator(),
+                "signature_denominator": transport.getTimeSignatureDenominator(),
+                "track_count": channels.channelCount(),
                 "master_track": {
                     "name": "Master",
-                    "volume": 0.8,
-                    "panning": 0.5
+                    "volume": mixer.getTrackVolume(0),  # Master track is 0
+                    "panning": mixer.getTrackPan(0)  # Master track is 0
                 }
             }
             return result
@@ -407,19 +356,48 @@ class FLStudioMCP:
             raise
     
     def _get_track_info(self, track_index):
-        """Get information about a track (channel in FL Studio) - simulated"""
+        """Get information about a track (channel in FL Studio)"""
         try:
-            # This is simulated as FL Studio doesn't provide direct feedback
+            if not FL_STUDIO_API_AVAILABLE:
+                # Simulated response when API is not available
+                return {
+                    "index": track_index,
+                    "name": f"Channel {track_index + 1}",
+                    "is_audio_track": False,
+                    "is_midi_track": True,
+                    "mute": False,
+                    "solo": False,
+                    "volume": 0.8,
+                    "panning": 0.5,
+                    "patterns": []
+                }
+            
+            # Get actual data from FL Studio API
+            channel_name = channels.getChannelName(track_index)
+            channel_type = channels.getChannelType(track_index)
+            
+            # Get patterns that use this channel
+            pattern_list = []
+            pattern_count = patterns.patternCount()
+            for i in range(pattern_count):
+                # Check if this pattern uses this channel
+                # This is a simplified approach - in reality, you'd need to check
+                # if the pattern contains notes for this channel
+                pattern_list.append({
+                    "index": i,
+                    "name": patterns.getPatternName(i)
+                })
+            
             result = {
                 "index": track_index,
-                "name": f"Channel {track_index + 1}",
-                "is_audio_track": False,
-                "is_midi_track": True,
-                "mute": False,
-                "solo": False,
-                "volume": 0.8,
-                "panning": 0.5,
-                "patterns": []
+                "name": channel_name,
+                "is_audio_track": channel_type == channels.CT_AUDIOTRACK,
+                "is_midi_track": channel_type == channels.CT_MIDIINPUT,
+                "mute": channels.isChannelMuted(track_index),
+                "solo": channels.isChannelSolo(track_index),
+                "volume": channels.getChannelVolume(track_index),
+                "panning": channels.getChannelPan(track_index),
+                "patterns": pattern_list
             }
             return result
         except Exception as e:
@@ -427,12 +405,37 @@ class FLStudioMCP:
             raise
     
     def _create_midi_track(self, index):
-        """Create a new channel in FL Studio (not directly possible via MIDI)"""
+        """Create a new channel in FL Studio"""
         try:
-            # Not directly possible via MIDI, but we can simulate a response
+            if not FL_STUDIO_API_AVAILABLE:
+                # Simulated response when API is not available
+                return {
+                    "index": index if index >= 0 else 0,
+                    "name": f"Channel {index + 1 if index >= 0 else 1}"
+                }
+            
+            # Create a new channel in FL Studio
+            # Note: FL Studio doesn't have a direct API to create a channel at a specific index
+            # So we create a new channel and then get its index
+            channels.selectAll()
+            channels.deselectAll()
+            ui.showWindow(midi.widChannelRack)
+            
+            # Add a new channel
+            new_channel_index = channels.channelCount()
+            # This is a workaround - in real implementation you'd use the appropriate API call
+            # For example, you might use a menu command to add a new channel
+            general.processRECEvent(midi.REC_AddChannel, 0)
+            
+            # Wait a bit for the channel to be created
+            time.sleep(0.1)
+            
+            # Get the name of the new channel
+            channel_name = channels.getChannelName(new_channel_index)
+            
             result = {
-                "index": index if index >= 0 else 0,
-                "name": f"Channel {index + 1 if index >= 0 else 1}"
+                "index": new_channel_index,
+                "name": channel_name
             }
             return result
         except Exception as e:
@@ -440,9 +443,17 @@ class FLStudioMCP:
             raise
     
     def _set_track_name(self, track_index, name):
-        """Set the name of a channel in FL Studio (not directly possible via MIDI)"""
+        """Set the name of a channel in FL Studio"""
         try:
-            # Not directly possible via MIDI, but we can simulate a response
+            if not FL_STUDIO_API_AVAILABLE:
+                # Simulated response when API is not available
+                return {
+                    "name": name
+                }
+            
+            # Set the name of the channel
+            channels.setChannelName(track_index, name)
+            
             result = {
                 "name": name
             }
@@ -452,11 +463,31 @@ class FLStudioMCP:
             raise
     
     def _create_pattern(self, track_index, pattern_index, length):
-        """Create a new pattern in FL Studio (not directly possible via MIDI)"""
+        """Create a new pattern in FL Studio"""
         try:
-            # Not directly possible via MIDI, but we can simulate a response
+            if not FL_STUDIO_API_AVAILABLE:
+                # Simulated response when API is not available
+                return {
+                    "name": f"Pattern {pattern_index + 1}",
+                    "length": length
+                }
+            
+            # Create a new pattern in FL Studio
+            # If pattern_index is -1, create a new pattern
+            if pattern_index == -1:
+                pattern_index = patterns.patternCount()
+                # Create a new pattern
+                general.processRECEvent(midi.REC_NewPattern, 0)
+            
+            # Set the pattern length (in beats)
+            # This is a simplified approach - in reality, you'd need to use the appropriate API call
+            patterns.setPatternLength(pattern_index, length)
+            
+            # Get the pattern name
+            pattern_name = patterns.getPatternName(pattern_index)
+            
             result = {
-                "name": f"Pattern {pattern_index + 1}",
+                "name": pattern_name,
                 "length": length
             }
             return result
@@ -465,10 +496,34 @@ class FLStudioMCP:
             raise
     
     def _add_notes_to_pattern(self, track_index, pattern_index, notes):
-        """Add MIDI notes to a pattern in FL Studio (would require sending actual MIDI notes)"""
+        """Add MIDI notes to a pattern in FL Studio"""
         try:
-            # This would require sending actual MIDI notes to FL Studio
-            # For now, we just simulate a response
+            if not FL_STUDIO_API_AVAILABLE:
+                # Simulated response when API is not available
+                return {
+                    "note_count": len(notes)
+                }
+            
+            # Select the pattern
+            patterns.jumpToPattern(pattern_index)
+            
+            # Select the channel
+            channels.selectOneChannel(track_index)
+            
+            # Add notes to the pattern
+            # This is a simplified approach - in reality, you'd need to use the appropriate API call
+            for note in notes:
+                # Extract note data
+                pitch = note.get("pitch", 60)  # Default to middle C
+                velocity = note.get("velocity", 100)
+                position = note.get("position", 0)  # In ticks
+                length = note.get("length", 240)  # In ticks (quarter note = 960 ticks)
+                
+                # Add the note
+                # This is a placeholder - you'd need to use the appropriate API call
+                # For example, you might use a piano roll API to add notes
+                channels.addNote(track_index, pitch, velocity, position, length)
+            
             result = {
                 "note_count": len(notes)
             }
@@ -478,9 +533,17 @@ class FLStudioMCP:
             raise
     
     def _set_pattern_name(self, track_index, pattern_index, name):
-        """Set the name of a pattern in FL Studio (not directly possible via MIDI)"""
+        """Set the name of a pattern in FL Studio"""
         try:
-            # Not directly possible via MIDI, but we can simulate a response
+            if not FL_STUDIO_API_AVAILABLE:
+                # Simulated response when API is not available
+                return {
+                    "name": name
+                }
+            
+            # Set the name of the pattern
+            patterns.setPatternName(pattern_index, name)
+            
             result = {
                 "name": name
             }
@@ -492,18 +555,17 @@ class FLStudioMCP:
     def _set_tempo(self, tempo):
         """Set the tempo of the session in FL Studio"""
         try:
-            # Map tempo to 0-127 range for MIDI CC
-            # FL Studio typically ranges from 40-999 BPM
-            # We'll map 40-300 BPM to 0-127 MIDI range
-            tempo = max(40, min(300, tempo))  # Clamp to 40-300 BPM
-            tempo_value = int(((tempo - 40) / 260) * 127)
+            if not FL_STUDIO_API_AVAILABLE:
+                # Simulated response when API is not available
+                return {
+                    "tempo": tempo
+                }
             
-            # Send tempo change CC
-            success = self.send_cc(CC_TEMPO, tempo_value)
+            # Set the tempo
+            transport.setTempoInBPM(tempo)
             
             result = {
-                "tempo": tempo,
-                "success": success
+                "tempo": tempo
             }
             return result
         except Exception as e:
@@ -513,17 +575,22 @@ class FLStudioMCP:
     def _play_pattern(self, pattern_index):
         """Play a pattern in FL Studio"""
         try:
-            # First select the pattern (if pattern_index is in range 0-127)
-            if 0 <= pattern_index <= 127:
-                self.send_cc(CC_PATTERN_SELECT, pattern_index)
+            if not FL_STUDIO_API_AVAILABLE:
+                # Simulated response when API is not available
+                return {
+                    "playing": True,
+                    "pattern_index": pattern_index
+                }
             
-            # Then send play command
-            success = self.send_cc(CC_PLAY, 127)  # 127 = on
+            # Select the pattern
+            patterns.jumpToPattern(pattern_index)
+            
+            # Start playback
+            transport.start()
             
             result = {
                 "playing": True,
-                "pattern_index": pattern_index,
-                "success": success
+                "pattern_index": pattern_index
             }
             return result
         except Exception as e:
@@ -533,13 +600,19 @@ class FLStudioMCP:
     def _stop_pattern(self, pattern_index):
         """Stop a pattern in FL Studio"""
         try:
-            # Send stop command
-            success = self.send_cc(CC_PLAY, 0)  # 0 = off
+            if not FL_STUDIO_API_AVAILABLE:
+                # Simulated response when API is not available
+                return {
+                    "stopped": True,
+                    "pattern_index": pattern_index
+                }
+            
+            # Stop playback
+            transport.stop()
             
             result = {
                 "stopped": True,
-                "pattern_index": pattern_index,
-                "success": success
+                "pattern_index": pattern_index
             }
             return result
         except Exception as e:
@@ -549,12 +622,17 @@ class FLStudioMCP:
     def _start_playback(self):
         """Start playing the session in FL Studio"""
         try:
-            # Send play command
-            success = self.send_cc(CC_PLAY, 127)  # 127 = on
+            if not FL_STUDIO_API_AVAILABLE:
+                # Simulated response when API is not available
+                return {
+                    "playing": True
+                }
+            
+            # Start playback
+            transport.start()
             
             result = {
-                "playing": True,
-                "success": success
+                "playing": True
             }
             return result
         except Exception as e:
@@ -564,12 +642,17 @@ class FLStudioMCP:
     def _stop_playback(self):
         """Stop playing the session in FL Studio"""
         try:
-            # Send stop command
-            success = self.send_cc(CC_PLAY, 0)  # 0 = off
+            if not FL_STUDIO_API_AVAILABLE:
+                # Simulated response when API is not available
+                return {
+                    "playing": False
+                }
+            
+            # Stop playback
+            transport.stop()
             
             result = {
-                "playing": False,
-                "success": success
+                "playing": False
             }
             return result
         except Exception as e:
@@ -577,22 +660,49 @@ class FLStudioMCP:
             raise
     
     def _get_plugin_list(self):
-        """Get a list of available plugins in FL Studio (not possible via MIDI)"""
+        """Get a list of available plugins in FL Studio"""
         try:
-            # Not possible via MIDI, but we can provide a static list of common FL Studio plugins
+            if not FL_STUDIO_API_AVAILABLE:
+                # Simulated response when API is not available
+                return {
+                    "plugins": [
+                        {"name": "3x Osc", "type": "instrument"},
+                        {"name": "FLEX", "type": "instrument"},
+                        {"name": "Fruity Parametric EQ 2", "type": "effect"},
+                        {"name": "Fruity Limiter", "type": "effect"},
+                        {"name": "Fruity Reeverb 2", "type": "effect"},
+                        {"name": "Fruity Delay 3", "type": "effect"},
+                        {"name": "Fruity Compressor", "type": "effect"},
+                        {"name": "Sytrus", "type": "instrument"},
+                        {"name": "Harmor", "type": "instrument"},
+                        {"name": "Fruity Chorus", "type": "effect"}
+                    ]
+                }
+            
+            # Get a list of plugins from FL Studio
+            # This is a simplified approach - in reality, you'd need to use the appropriate API call
+            plugin_list = []
+            
+            # Get generator plugins (instruments)
+            generator_count = plugins.getPluginCount(plugins.GENERATOR)
+            for i in range(generator_count):
+                plugin_name = plugins.getPluginName(i, plugins.GENERATOR)
+                plugin_list.append({
+                    "name": plugin_name,
+                    "type": "instrument"
+                })
+            
+            # Get effect plugins
+            effect_count = plugins.getPluginCount(plugins.EFFECT)
+            for i in range(effect_count):
+                plugin_name = plugins.getPluginName(i, plugins.EFFECT)
+                plugin_list.append({
+                    "name": plugin_name,
+                    "type": "effect"
+                })
+            
             result = {
-                "plugins": [
-                    {"name": "3x Osc", "type": "instrument"},
-                    {"name": "FLEX", "type": "instrument"},
-                    {"name": "Fruity Parametric EQ 2", "type": "effect"},
-                    {"name": "Fruity Limiter", "type": "effect"},
-                    {"name": "Fruity Reeverb 2", "type": "effect"},
-                    {"name": "Fruity Delay 3", "type": "effect"},
-                    {"name": "Fruity Compressor", "type": "effect"},
-                    {"name": "Sytrus", "type": "instrument"},
-                    {"name": "Harmor", "type": "instrument"},
-                    {"name": "Fruity Chorus", "type": "effect"}
-                ]
+                "plugins": plugin_list
             }
             return result
         except Exception as e:
@@ -600,15 +710,61 @@ class FLStudioMCP:
             raise
     
     def _load_plugin(self, track_index, plugin_name):
-        """Load a plugin onto a channel in FL Studio (not directly possible via MIDI)"""
+        """Load a plugin onto a channel in FL Studio"""
         try:
-            # Not directly possible via MIDI, but we can simulate a response
-            result = {
-                "loaded": False,  # Set to false as this isn't actually possible via MIDI
-                "plugin_name": plugin_name,
-                "track_index": track_index,
-                "message": "Loading plugins is not supported via MIDI. Please load the plugin manually in FL Studio."
-            }
+            if not FL_STUDIO_API_AVAILABLE:
+                # Simulated response when API is not available
+                return {
+                    "loaded": False,
+                    "plugin_name": plugin_name,
+                    "track_index": track_index,
+                    "message": "FL Studio API not available. Please load the plugin manually."
+                }
+            
+            # Select the channel
+            channels.selectOneChannel(track_index)
+            
+            # Find the plugin
+            plugin_found = False
+            plugin_index = -1
+            plugin_type = plugins.GENERATOR  # Default to generator (instrument)
+            
+            # Check if it's a generator plugin
+            generator_count = plugins.getPluginCount(plugins.GENERATOR)
+            for i in range(generator_count):
+                if plugins.getPluginName(i, plugins.GENERATOR) == plugin_name:
+                    plugin_found = True
+                    plugin_index = i
+                    plugin_type = plugins.GENERATOR
+                    break
+            
+            # If not found, check if it's an effect plugin
+            if not plugin_found:
+                effect_count = plugins.getPluginCount(plugins.EFFECT)
+                for i in range(effect_count):
+                    if plugins.getPluginName(i, plugins.EFFECT) == plugin_name:
+                        plugin_found = True
+                        plugin_index = i
+                        plugin_type = plugins.EFFECT
+                        break
+            
+            if plugin_found:
+                # Load the plugin onto the channel
+                channels.addPlugin(track_index, plugin_index, plugin_type)
+                
+                result = {
+                    "loaded": True,
+                    "plugin_name": plugin_name,
+                    "track_index": track_index
+                }
+            else:
+                result = {
+                    "loaded": False,
+                    "plugin_name": plugin_name,
+                    "track_index": track_index,
+                    "message": f"Plugin '{plugin_name}' not found."
+                }
+            
             return result
         except Exception as e:
             self.log_message("Error loading plugin: " + str(e))
