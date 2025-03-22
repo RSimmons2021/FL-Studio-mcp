@@ -27,7 +27,7 @@ except ImportError:
     print("FL Studio API modules not available. Running in simulation mode.")
 
 # Constants for socket communication
-DEFAULT_PORT = 9877
+DEFAULT_PORT = 9050
 HOST = "localhost"
 
 def create_instance(c_instance):

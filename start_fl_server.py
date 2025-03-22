@@ -6,7 +6,7 @@ import argparse
 
 def main():
     parser = argparse.ArgumentParser(description="Start the FL Studio MCP Server")
-    parser.add_argument("--port", type=int, default=9877, help="Port to run the server on (default: 9877)")
+    parser.add_argument("--port", type=int, default=9050, help="Port to run the server on (default: 9050)")
     parser.add_argument("--host", default="localhost", help="Host to bind the server to (default: localhost)")
     args = parser.parse_args()
     

@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger("FLStudioMCPServer")
 
 class FLStudioServer:
-    def __init__(self, host="localhost", port=9877):
+    def __init__(self, host="localhost", port=9050):
         self.host = host
         self.port = port
         self.server = None
@@ -318,7 +318,7 @@ class FLStudioServer:
 def main():
     parser = argparse.ArgumentParser(description="FL Studio MCP Server")
     parser.add_argument("--host", default="localhost", help="Host to bind the server to")
-    parser.add_argument("--port", type=int, default=9877, help="Port to bind the server to")
+    parser.add_argument("--port", type=int, default=9050, help="Port to bind the server to")
     
     args = parser.parse_args()
     

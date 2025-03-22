@@ -19,7 +19,7 @@ logger = logging.getLogger("FLStudioPrompt")
 
 # Constants
 HOST = "localhost"
-DEFAULT_PORT = 9877
+DEFAULT_PORT = 9050
 
 # Add the parent directory to path to import client
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

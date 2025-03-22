@@ -13,7 +13,7 @@ logger = logging.getLogger("FLStudioClient")
 SIMULATION_MODE = False
 
 class FLStudioClient:
-    def __init__(self, host="localhost", port=9877):
+    def __init__(self, host="localhost", port=9050):
         self.host = host
         self.port = port
         self.connected = False
@@ -216,7 +216,7 @@ def get_simulation_mode():
     global SIMULATION_MODE
     return SIMULATION_MODE
 
-def get_fl_studio_client(host="localhost", port=9877):
+def get_fl_studio_client(host="localhost", port=9050):
     """Get or create a persistent FL Studio client"""
     global _fl_studio_client
     if _fl_studio_client is None:
