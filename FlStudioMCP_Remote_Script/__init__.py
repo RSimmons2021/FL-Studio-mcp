@@ -1,13 +1,30 @@
-# name= Fl Studio MCP
-# url=
-from __future__ import absolute_import, print_function, unicode_literals
-
+# name=FL Studio MCP
+# url=https://github.com/RSimmons2021/FL-Studio-mcp
 import socket
 import json
 import threading
 import time
 import traceback
 import queue
+import logging
+import os
+import sys
+
+# Configure logging
+log_dir = os.path.join(os.path.expanduser('~'), 'Documents', 'FL Studio', 'Logs')
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, 'flstudio_mcp.log')
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger('FLStudioMCP')
 
 # Import FL Studio API modules
 try:
@@ -22,9 +39,10 @@ try:
     import arrangement
     import playlist
     FL_STUDIO_API_AVAILABLE = True
+    logger.info("FL Studio API modules loaded successfully")
 except ImportError:
     FL_STUDIO_API_AVAILABLE = False
-    print("FL Studio API modules not available. Running in simulation mode.")
+    logger.warning("FL Studio API modules not available. Running in simulation mode.")
 
 # Constants for socket communication
 DEFAULT_PORT = 9050
@@ -40,7 +58,7 @@ class FLStudioMCP:
     def __init__(self, c_instance):
         """Initialize the control surface"""
         self.c_instance = c_instance
-        self.log_message("FLStudioMCP Remote Script initializing...")
+        logger.info("FLStudioMCP Remote Script initializing...")
         
         # Socket server for communication
         self.server = None
@@ -51,18 +69,18 @@ class FLStudioMCP:
         # Start the socket server
         self.start_server()
         
-        self.log_message("FLStudioMCP initialized")
+        logger.info("FLStudioMCP initialized")
         
         # Show a message
         self.show_message("FLStudioMCP: Listening for commands on port " + str(DEFAULT_PORT))
     
     def log_message(self, message):
         """Log a message"""
-        print("[FLStudioMCP] " + message)
+        logger.info(message)
     
     def show_message(self, message):
         """Show a message in FL Studio's interface"""
-        print("[FLStudioMCP] " + message)
+        logger.info(message)
         if FL_STUDIO_API_AVAILABLE:
             try:
                 ui.setHintMsg(message)
@@ -71,7 +89,7 @@ class FLStudioMCP:
     
     def disconnect(self):
         """Called when the script is disconnected"""
-        self.log_message("FLStudioMCP disconnecting...")
+        logger.info("FLStudioMCP disconnecting...")
         self.running = False
         
         # Stop the server
@@ -89,9 +107,9 @@ class FLStudioMCP:
         for client_thread in self.client_threads[:]:
             if client_thread.is_alive():
                 # We don't join them as they might be stuck
-                self.log_message(f"Client thread still alive during disconnect")
+                logger.info(f"Client thread still alive during disconnect")
         
-        self.log_message("FLStudioMCP disconnected")
+        logger.info("FLStudioMCP disconnected")
     
     def start_server(self):
         """Start the socket server in a separate thread"""
@@ -106,15 +124,15 @@ class FLStudioMCP:
             self.server_thread.daemon = True
             self.server_thread.start()
             
-            self.log_message("Server started on port " + str(DEFAULT_PORT))
+            logger.info("Server started on port " + str(DEFAULT_PORT))
         except Exception as e:
-            self.log_message("Error starting server: " + str(e))
+            logger.error("Error starting server: " + str(e))
             self.show_message("FLStudioMCP: Error starting server - " + str(e))
     
     def _server_thread(self):
         """Server thread implementation - handles client connections"""
         try:
-            self.log_message("Server thread started")
+            logger.info("Server thread started")
             # Set a timeout to allow regular checking of running flag
             self.server.settimeout(1.0)
             
@@ -122,7 +140,7 @@ class FLStudioMCP:
                 try:
                     # Accept connections with timeout
                     client, address = self.server.accept()
-                    self.log_message("Connection accepted from " + str(address))
+                    logger.info("Connection accepted from " + str(address))
                     self.show_message("FLStudioMCP: Client connected")
                     
                     # Handle client in a separate thread
@@ -144,16 +162,16 @@ class FLStudioMCP:
                     continue
                 except Exception as e:
                     if self.running:  # Only log if still running
-                        self.log_message("Server accept error: " + str(e))
+                        logger.error("Server accept error: " + str(e))
                     time.sleep(0.5)
             
-            self.log_message("Server thread stopped")
+            logger.info("Server thread stopped")
         except Exception as e:
-            self.log_message("Server thread error: " + str(e))
+            logger.error("Server thread error: " + str(e))
     
     def _handle_client(self, client):
         """Handle communication with a connected client"""
-        self.log_message("Client handler started")
+        logger.info("Client handler started")
         client.settimeout(None)  # No timeout for client socket
         buffer = b''
         
@@ -165,7 +183,7 @@ class FLStudioMCP:
                     
                     if not data:
                         # Client disconnected
-                        self.log_message("Client disconnected")
+                        logger.info("Client disconnected")
                         break
                     
                     # Accumulate data in buffer
@@ -176,7 +194,7 @@ class FLStudioMCP:
                         command = json.loads(buffer.decode('utf-8'))
                         buffer = b''  # Clear buffer after successful parse
                         
-                        self.log_message("Received command: " + str(command.get("type", "unknown")))
+                        logger.info("Received command: " + str(command.get("type", "unknown")))
                         
                         # Process the command and get response
                         response = self._process_command(command)
@@ -188,8 +206,8 @@ class FLStudioMCP:
                         continue
                         
                 except Exception as e:
-                    self.log_message("Error handling client data: " + str(e))
-                    self.log_message(traceback.format_exc())
+                    logger.error("Error handling client data: " + str(e))
+                    logger.error(traceback.format_exc())
                     
                     # Send error response if possible
                     error_response = {
@@ -206,13 +224,13 @@ class FLStudioMCP:
                     if not isinstance(e, json.JSONDecodeError):
                         break
         except Exception as e:
-            self.log_message("Error in client handler: " + str(e))
+            logger.error("Error in client handler: " + str(e))
         finally:
             try:
                 client.close()
             except:
                 pass
-            self.log_message("Client handler stopped")
+            logger.info("Client handler stopped")
     
     def _process_command(self, command):
         """Process a command from the client and return a response"""
@@ -287,8 +305,8 @@ class FLStudioMCP:
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
                     except Exception as e:
-                        self.log_message("Error in task: " + str(e))
-                        self.log_message(traceback.format_exc())
+                        logger.error("Error in task: " + str(e))
+                        logger.error(traceback.format_exc())
                         response_queue.put({"status": "error", "message": str(e)})
                 
                 # Execute the task
@@ -313,8 +331,8 @@ class FLStudioMCP:
                 response["status"] = "error"
                 response["message"] = "Unknown command: " + command_type
         except Exception as e:
-            self.log_message("Error processing command: " + str(e))
-            self.log_message(traceback.format_exc())
+            logger.error("Error processing command: " + str(e))
+            logger.error(traceback.format_exc())
             response["status"] = "error"
             response["message"] = str(e)
         
@@ -353,7 +371,7 @@ class FLStudioMCP:
             }
             return result
         except Exception as e:
-            self.log_message("Error getting session info: " + str(e))
+            logger.error("Error getting session info: " + str(e))
             raise
     
     def _get_track_info(self, track_index):
@@ -402,7 +420,7 @@ class FLStudioMCP:
             }
             return result
         except Exception as e:
-            self.log_message("Error getting track info: " + str(e))
+            logger.error("Error getting track info: " + str(e))
             raise
     
     def _create_midi_track(self, index):
@@ -440,7 +458,7 @@ class FLStudioMCP:
             }
             return result
         except Exception as e:
-            self.log_message("Error creating MIDI track: " + str(e))
+            logger.error("Error creating MIDI track: " + str(e))
             raise
     
     def _set_track_name(self, track_index, name):
@@ -460,7 +478,7 @@ class FLStudioMCP:
             }
             return result
         except Exception as e:
-            self.log_message("Error setting track name: " + str(e))
+            logger.error("Error setting track name: " + str(e))
             raise
     
     def _create_pattern(self, track_index, pattern_index, length):
@@ -493,7 +511,7 @@ class FLStudioMCP:
             }
             return result
         except Exception as e:
-            self.log_message("Error creating pattern: " + str(e))
+            logger.error("Error creating pattern: " + str(e))
             raise
     
     def _add_notes_to_pattern(self, track_index, pattern_index, notes):
@@ -530,7 +548,7 @@ class FLStudioMCP:
             }
             return result
         except Exception as e:
-            self.log_message("Error adding notes to pattern: " + str(e))
+            logger.error("Error adding notes to pattern: " + str(e))
             raise
     
     def _set_pattern_name(self, track_index, pattern_index, name):
@@ -550,7 +568,7 @@ class FLStudioMCP:
             }
             return result
         except Exception as e:
-            self.log_message("Error setting pattern name: " + str(e))
+            logger.error("Error setting pattern name: " + str(e))
             raise
     
     def _set_tempo(self, tempo):
@@ -570,7 +588,7 @@ class FLStudioMCP:
             }
             return result
         except Exception as e:
-            self.log_message("Error setting tempo: " + str(e))
+            logger.error("Error setting tempo: " + str(e))
             raise
     
     def _play_pattern(self, pattern_index):
@@ -595,7 +613,7 @@ class FLStudioMCP:
             }
             return result
         except Exception as e:
-            self.log_message("Error playing pattern: " + str(e))
+            logger.error("Error playing pattern: " + str(e))
             raise
     
     def _stop_pattern(self, pattern_index):
@@ -617,7 +635,7 @@ class FLStudioMCP:
             }
             return result
         except Exception as e:
-            self.log_message("Error stopping pattern: " + str(e))
+            logger.error("Error stopping pattern: " + str(e))
             raise
     
     def _start_playback(self):
@@ -637,7 +655,7 @@ class FLStudioMCP:
             }
             return result
         except Exception as e:
-            self.log_message("Error starting playback: " + str(e))
+            logger.error("Error starting playback: " + str(e))
             raise
     
     def _stop_playback(self):
@@ -657,7 +675,7 @@ class FLStudioMCP:
             }
             return result
         except Exception as e:
-            self.log_message("Error stopping playback: " + str(e))
+            logger.error("Error stopping playback: " + str(e))
             raise
     
     def _get_plugin_list(self):
@@ -707,7 +725,7 @@ class FLStudioMCP:
             }
             return result
         except Exception as e:
-            self.log_message("Error getting plugin list: " + str(e))
+            logger.error("Error getting plugin list: " + str(e))
             raise
     
     def _load_plugin(self, track_index, plugin_name):
@@ -768,5 +786,5 @@ class FLStudioMCP:
             
             return result
         except Exception as e:
-            self.log_message("Error loading plugin: " + str(e))
+            logger.error("Error loading plugin: " + str(e))
             raise

@@ -198,19 +198,47 @@ class FLStudioServer:
     
     def _create_midi_track(self, index):
         """Create a new MIDI track"""
-        # In a real implementation, this would create a track in FL Studio
-        # Here we just simulate success and return a track index
         try:
             # Convert index to integer if it's a string
             if isinstance(index, str):
                 index = int(index)
-            track_index = index if index >= 0 else 8  # Simulate adding at the end
-            return {
-                "status": "success",
-                "result": {
-                    "index": track_index
+                
+            # Check if FL Studio API is available
+            try:
+                import channels
+                import mixer
+                
+                # Create a new channel in FL Studio
+                if index < 0:
+                    # Find the first empty channel
+                    for i in range(channels.channelCount()):
+                        if not channels.isChannelUsed(i):
+                            index = i
+                            break
+                    if index < 0:  # If all channels are used
+                        index = channels.channelCount() - 1
+                
+                # Make sure the channel exists
+                channels.selectChannel(index)
+                
+                # Return the actual index
+                logger.info(f"Created MIDI track at index {index}")
+                return {
+                    "status": "success",
+                    "result": {
+                        "index": index
+                    }
                 }
-            }
+            except ImportError:
+                # FL Studio API not available, simulate success
+                logger.warning("FL Studio API not available, simulating track creation")
+                track_index = index if index >= 0 else 8  # Simulate adding at the end
+                return {
+                    "status": "success",
+                    "result": {
+                        "index": track_index
+                    }
+                }
         except (ValueError, TypeError) as e:
             # Handle the case where index can't be converted to int
             return {
